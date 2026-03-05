@@ -10,8 +10,12 @@ Thread-safe pattern manager with:
 
 import json
 import os
+import re
 import threading
 import time
+import unicodedata
+import base64
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -149,13 +153,47 @@ class PatternManager:
             print(f"✗ Hot-reload failed: {e}")
             return False
     
+    @staticmethod
+    def _decode_text(text: str) -> str:
+        """
+        Attempt to decode obfuscated text.
+        Handles: URL encoding, Base64, Unicode homoglyphs, zero-width chars.
+        Returns decoded version (or original if decoding adds nothing useful).
+        """
+        # 1. Unicode normalization (catches homoglyphs + zero-width spaces)
+        normalized = unicodedata.normalize("NFKC", text)
+        normalized = re.sub(r"[\u200B-\u200D\u2060\uFEFF\u00AD]", "", normalized)
+
+        # 2. URL decode
+        url_decoded = urllib.parse.unquote(normalized)
+
+        # 3. Base64 decode attempt
+        b64_decoded = url_decoded
+        try:
+            # Strip whitespace and attempt decode
+            candidate = re.sub(r'\s+', '', url_decoded)
+            padded = candidate + '=' * (-len(candidate) % 4)
+            decoded_bytes = base64.b64decode(padded, validate=True)
+            candidate_text = decoded_bytes.decode('utf-8', errors='ignore')
+            # Only accept if it looks like readable text (>5 chars, high ASCII ratio)
+            printable_ratio = sum(c.isprintable() for c in candidate_text) / max(len(candidate_text), 1)
+            if len(candidate_text) > 5 and printable_ratio > 0.8:
+                b64_decoded = candidate_text
+        except Exception:
+            pass
+
+        return b64_decoded
+
     def match(self, text: str) -> Tuple[bool, float, Optional[str]]:
         """
         Match text against all patterns.
-        
+
+        Runs matching on BOTH the raw text AND the decoded/normalized text
+        to catch Base64, URL-encoded, and Unicode-obfuscated attacks.
+
         Args:
             text: Text to check
-        
+
         Returns:
             Tuple of (matched, score, rule_id)
             - matched: True if any pattern matched
@@ -164,23 +202,27 @@ class PatternManager:
         """
         with self._lock:
             patterns_snapshot = self.patterns.copy()
-        
+
+        # Decode text to catch obfuscated attacks
+        decoded_text = self._decode_text(text)
+        # Combine: check raw + decoded surface (dedup via set)
+        check_surfaces = [text]
+        if decoded_text.strip().lower() != text.strip().lower():
+            check_surfaces.append(decoded_text)
+
         best_match = None
         max_score = 0.0
-        
+
         for pattern_id, pattern in patterns_snapshot.items():
-            score = self._check_pattern(text, pattern)
-            
-            if score > max_score:
-                max_score = score
-                best_match = pattern_id
-            
-            if score > 0:
-                # Track hit
-                self._track_hit(pattern_id)
-        
-        matched = max_score > 0.5  # Threshold for blocking
-        
+            for surface in check_surfaces:
+                score = self._check_pattern(surface, pattern)
+                if score > max_score:
+                    max_score = score
+                    best_match = pattern_id
+                if score > 0:
+                    self._track_hit(pattern_id)
+
+        matched = max_score > 0.6  # Threshold for blocking (raised from 0.5 to reduce FP)
         return matched, max_score, best_match
     
     def _check_pattern(self, text: str, pattern: Dict) -> float:
@@ -215,19 +257,23 @@ class PatternManager:
             if pattern['prompt'].lower() in text_lower:
                 return 1.0
             
-            # 2. Flexible overlap check
+            # 2. Flexible overlap check (require input text is substantive)
             prompt_words = [w for w in prompt_lower.split() if len(w) > 2] # Ignore small words
             text_words = [w for w in text_lower.split() if len(w) > 2]
             
             if not prompt_words:
                 return score
+
+            # Skip fuzzy overlap for very short input (reduces FP on "What is X?" queries)
+            if len(text_words) < 4:
+                return score
                 
             common = set(prompt_words) & set(text_words)
             overlap_count = len(common)
             
-            # For short phrases (2-3 words), require high overlap
+            # For short phrases (2-3 words), require FULL overlap (was n-1, too loose)
             if len(prompt_words) <= 3:
-                if overlap_count >= len(prompt_words) - 1:
+                if overlap_count >= len(prompt_words):
                     score = max(score, 0.85)
             # For longer phrases, use ratio
             else:

@@ -22,10 +22,11 @@ Legacy API (Deprecated):
     from promptshield.shields import InputShield_L5  # Deprecated
 """
 
-__version__ = "2.1.4"
+__version__ = "2.5.0"
 
 # New configurable Shield (recommended)
 from .shields import Shield, register_component, ShieldComponent
+from .shields_async import AsyncShield
 
 # Legacy shields (deprecated but supported)
 from .shields import InputShield_L5, OutputShield_L5, AgentShield_L3
@@ -74,6 +75,7 @@ from .testing import PromptShieldEvasionTester
 __all__ = [
     # Main Shield API (v2.0)
     "Shield",
+    "AsyncShield",
     "register_component",
     "ShieldComponent",
     

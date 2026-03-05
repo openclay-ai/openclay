@@ -153,6 +153,10 @@ class Shield:
         # Model security
         verify_models: bool = False,
         
+        # Allowlist / Custom rules
+        allowlist: Optional[List[str]] = None,
+        custom_patterns: Optional[List[str]] = None,
+        
         # Performance
         cache_predictions: bool = True,
         async_mode: bool = False,
@@ -179,6 +183,8 @@ class Shield:
             pii_detection: Enable PII detection
             pii_redaction: Redaction mode
             verify_models: Verify model signatures
+            allowlist: List of exact phrases to never block
+            custom_patterns: List of regex patterns to always block
             cache_predictions: Cache ML predictions
             async_mode: Enable async operations
             custom_components: List of custom component names
@@ -197,6 +203,8 @@ class Shield:
             "pii_detection": pii_detection,
             "pii_redaction": pii_redaction,
             "verify_models": verify_models,
+            "allowlist": [p.lower().strip() for p in (allowlist or [])],
+            "custom_patterns": custom_patterns or [],
             "cache_predictions": cache_predictions,
             "async_mode": async_mode,
             **kwargs
@@ -281,9 +289,9 @@ class Shield:
         
         models_dir = os.path.join(os.path.dirname(__file__), "models")
         
-        # 1. Load Vectorizer (Required for all ML models)
+        # 1. Load Vectorizer (shared TF-IDF, trained on core split — zero leakage)
         try:
-            vec_path = os.path.join(models_dir, "tfidf_vectorizer_expanded.pkl")
+            vec_path = os.path.join(models_dir, "tfidf_vectorizer.pkl")
             if os.path.exists(vec_path):
                 self.vectorizer = joblib.load(vec_path)
             else:
@@ -294,25 +302,46 @@ class Shield:
             return
 
         # 2. Load Models
+        # Filename map for new leak-free models (trained on neuralchemy/Prompt-injection-dataset v2)
+        filename_map = {
+            "logistic_regression": "logistic_regression.pkl",
+            "random_forest":       "random_forest.pkl",
+            "linear_svc":          "linear_svc.pkl",
+            "gradient_boosting":   "gradient_boosting.pkl",
+            # Legacy aliases
+            "svm":                 "linear_svc.pkl",
+        }
+
         for model_name in self.config["models"]:
             try:
-                # Semantic models
-                if model_name == "semantic" or "transformer" in model_name:
-                    # ... (keep existing semantic loading logic if needed, or remove if not using yet)
-                    pass 
-                        
+                if model_name in ("semantic", "transformer"):
+                    # Placeholder for future transformer integration
+                    pass
+
+                elif model_name == "deberta":
+                    # Auto-download DeBERTa from HuggingFace Hub on first use
+                    try:
+                        from transformers import pipeline as hf_pipeline
+                        deberta_pipe = hf_pipeline(
+                            "text-classification",
+                            model="neuralchemy/prompt-injection-deberta",
+                            device=-1,  # CPU by default; set to 0 for GPU
+                            truncation=True,
+                            max_length=256,
+                        )
+                        self.models["deberta"] = {
+                            "model": deberta_pipe,
+                            "type": "deberta",
+                            "status": "active"
+                        }
+                        print("  ✅ Loaded deberta (neuralchemy/prompt-injection-deberta)")
+                    except Exception as e:
+                        print(f"⚠️  Failed to load DeBERTa: {e}")
+
                 else:
-                    # ML Models (Logistic, RF, SVM)
-                    # Map simple names to filenames
-                    filename_map = {
-                        "logistic_regression": "logistic_regression_expanded.pkl",
-                        "random_forest": "random_forest_expanded.pkl",
-                        "svm": "svm_expanded.pkl"
-                    }
-                    
                     fname = filename_map.get(model_name, f"{model_name}.pkl")
                     model_path = os.path.join(models_dir, fname)
-                    
+
                     if os.path.exists(model_path):
                         loaded_model = joblib.load(model_path)
                         self.models[model_name] = {
@@ -320,77 +349,79 @@ class Shield:
                             "type": "sklearn",
                             "status": "active"
                         }
+                        print(f"  ✅ Loaded {model_name} ({fname})")
                     else:
                         print(f"⚠️  Model file not found: {fname}")
-                        
+
             except Exception as e:
                 print(f"⚠️  Failed to load model {model_name}: {e}")
     
     def _check_ml_models(self, text: str) -> float:
         """
         Check text against ML models with ensemble voting.
-        
+
         Uses majority voting + probability averaging for robust predictions.
-        
-        Args:
-            text: Input text to analyze
-            
+        DeBERTa uses a HuggingFace pipeline and is handled separately.
+
         Returns:
             Threat score (0.0 - 1.0)
         """
         if not self.models or not hasattr(self, 'vectorizer'):
+            # Check for DeBERTa-only setup (no vectorizer needed)
+            deberta_data = self.models.get("deberta")
+            if deberta_data and deberta_data.get("status") == "active":
+                try:
+                    pipe = deberta_data["model"]
+                    result = pipe(text[:512])[0]
+                    # LABEL_1 = attack in our model
+                    if result["label"] in ("LABEL_1", "1", 1):
+                        return result["score"]
+                    else:
+                        return 1.0 - result["score"]
+                except Exception:
+                    pass
             return 0.0
-        
+
         try:
-            # Vectorize input
             X = self.vectorizer.transform([text])
-            
-            # Collect predictions from all models
             predictions = []
             probabilities = []
-            
+
             for model_name, model_data in self.models.items():
                 if model_data.get("status") != "active":
                     continue
-                    
                 model = model_data.get("model")
                 if model is None:
                     continue
-                
+
                 try:
-                    # Get prediction (0 = safe, 1 = attack)
-                    pred = model.predict(X)[0]
-                    predictions.append(pred)
-                    
-                    # Get probability if available
-                    if hasattr(model, 'predict_proba'):
-                        prob = model.predict_proba(X)[0]
-                        # prob[1] is probability of attack class
-                        probabilities.append(prob[1] if len(prob) > 1 else prob[0])
+                    if model_data.get("type") == "deberta":
+                        # DeBERTa: use pipeline directly
+                        result = model(text[:512])[0]
+                        prob = result["score"] if result["label"] in ("LABEL_1", "1", 1) else 1.0 - result["score"]
+                        predictions.append(1 if prob >= 0.5 else 0)
+                        probabilities.append(prob)
                     else:
-                        # Use prediction as probability
-                        probabilities.append(float(pred))
-                        
+                        pred = model.predict(X)[0]
+                        predictions.append(pred)
+                        if hasattr(model, 'predict_proba'):
+                            prob = model.predict_proba(X)[0]
+                            probabilities.append(prob[1] if len(prob) > 1 else prob[0])
+                        else:
+                            probabilities.append(float(pred))
                 except Exception as e:
                     print(f"⚠️  Model {model_name} prediction failed: {e}")
                     continue
-            
+
             if not predictions:
                 return 0.0
-            
-            # Ensemble Strategy: Weighted voting
-            # 1. Majority vote (counts attacks vs safe)
+
             attack_votes = sum(predictions)
-            vote_ratio = attack_votes / len(predictions)
-            
-            # 2. Average probability
-            avg_prob = sum(probabilities) / len(probabilities) if probabilities else 0.0
-            
-            # 3. Combine (weighted average: 40% vote, 60% probability)
+            vote_ratio   = attack_votes / len(predictions)
+            avg_prob     = sum(probabilities) / len(probabilities) if probabilities else 0.0
             threat_score = (0.4 * vote_ratio) + (0.6 * avg_prob)
-            
             return min(threat_score, 1.0)
-            
+
         except Exception as e:
             print(f"⚠️  ML model check failed: {e}")
             return 0.0
@@ -496,9 +527,9 @@ class Shield:
             "pii_redaction": "smart",
             "verify_models": False,
         }
-        # Add full ML ensemble if not overridden
+        # Full ML ensemble: Random Forest + LR + LinearSVC + Gradient Boosting
         if "models" not in kwargs:
-            defaults["models"] = ["logistic_regression", "random_forest", "svm"]
+            defaults["models"] = ["random_forest", "logistic_regression", "linear_svc", "gradient_boosting"]
         
         defaults.update(kwargs)
         return cls(**defaults)
@@ -525,7 +556,43 @@ class Shield:
             Dictionary with protection result
         """
         start_time = time.time()
-        
+
+        # Track per-layer scores for breakdown
+        threat_breakdown = {
+            "pattern_score": 0.0,
+            "ml_score":      0.0,
+            "session_score": 0.0,
+        }
+
+        # 0a. Allowlist — skip all checks for known-safe phrases
+        if self.config["allowlist"]:
+            input_lower = user_input.lower().strip()
+            for safe_phrase in self.config["allowlist"]:
+                if safe_phrase in input_lower:
+                    return {
+                        "blocked": False,
+                        "reason": "allowlisted",
+                        "threat_level": 0.0,
+                        "threat_breakdown": threat_breakdown,
+                        "metadata": {"component": "allowlist", "matched": safe_phrase},
+                    }
+
+        # 0b. Custom patterns — always block on match
+        if self.config["custom_patterns"]:
+            import re
+            for pattern in self.config["custom_patterns"]:
+                try:
+                    if re.search(pattern, user_input, re.IGNORECASE):
+                        return {
+                            "blocked": True,
+                            "reason": "custom_pattern",
+                            "threat_level": 1.0,
+                            "threat_breakdown": threat_breakdown,
+                            "metadata": {"component": "custom_pattern", "pattern": pattern},
+                        }
+                except re.error:
+                    pass
+
         # 1. Rate limiting check
         if self.config["rate_limiting"] and user_id:
             rate_result = self.rate_limiter.check_limit(user_id, threat_level=0.0)
@@ -536,47 +603,55 @@ class Shield:
                     "retry_after": rate_result["retry_after"],
                     "metadata": {"component": "rate_limiter"}
                 }
-        
+
         # 2. Pattern matching
         threat_level = 0.0
         if self.config["patterns"]:
             matched, score, rule = self.pattern_manager.match(user_input)
+            threat_breakdown["pattern_score"] = round(score, 3)
             threat_level = max(threat_level, score)
-            
+
             if matched:
                 return {
                     "blocked": True,
                     "reason": "pattern_match",
                     "rule": rule,
                     "threat_level": score,
+                    "threat_breakdown": threat_breakdown,
                     "metadata": {"component": "pattern_matcher"}
                 }
-        
+
         # 3. ML model prediction
         if self.config["models"]:
             ml_threat = self._check_ml_models(user_input)
+            threat_breakdown["ml_score"] = round(ml_threat, 3)
             threat_level = max(threat_level, ml_threat)
-            
+
             if ml_threat >= self.config["model_threshold"]:
                 return {
                     "blocked": True,
                     "reason": "ml_detection",
                     "threat_level": ml_threat,
+                    "threat_breakdown": threat_breakdown,
                     "metadata": {"component": "ml_model"}
                 }
-        
+
         # 4. Session anomaly detection
         if self.config["session_tracking"] and session_id:
             shield_result = {"threat_level": threat_level, "blocked": False}
             session_result = self.session_detector.analyze(
                 session_id, user_input, shield_result
             )
-            
+            threat_breakdown["session_score"] = round(
+                session_result.get("session_threat", 0.0), 3
+            )
+
             if session_result["action"] == "block_session":
                 return {
                     "blocked": True,
                     "reason": session_result["reason"],
                     "session_threat": session_result["session_threat"],
+                    "threat_breakdown": threat_breakdown,
                     "metadata": {"component": "session_anomaly"}
                 }
         
@@ -703,11 +778,7 @@ class Shield:
             "latency_ms": latency_ms
         }
     
-    def _check_ml_models(self, text: str) -> float:
-        """Check text against ML models"""
-        # TODO: Implement actual ML model loading and prediction
-        # For now, return 0 (not implemented yet)
-        return 0.0
+    # _check_ml_models is defined above (lines ~329-396) — duplicate stub removed
     
     def _get_active_components(self) -> List[str]:
         """Get list of active components"""
