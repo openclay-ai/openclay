@@ -146,18 +146,18 @@ class AsyncShield(Shield):
         # PII check on chunk (run in thread if enabled)
         if self.config["pii_detection"]:
             result = await asyncio.to_thread(
-                self._scan_chunk_pii, chunk
+                self._scan_chunk_pii, full_text
             )
             if result:
                 return result
 
         return {"blocked": False, "text": chunk, "reason": None}
 
-    def _scan_chunk_pii(self, chunk: str) -> Optional[Dict]:
+    def _scan_chunk_pii(self, text: str) -> Optional[Dict]:
         """Scan a chunk for PII (sync helper for thread pool)."""
         from .methods import pii_scan
 
-        findings = pii_scan(chunk)
+        findings = pii_scan(text)
         if findings:
             return {
                 "blocked": True,
@@ -166,3 +166,37 @@ class AsyncShield(Shield):
                 "findings": findings,
             }
         return None
+
+    async def protect_stream(
+        self,
+        async_generator,
+        canary: Optional[Dict] = None,
+        **context,
+    ):
+        """
+        Wrap an async text generator to automatically scan for threats mid-generation.
+        Raises StreamBlockedError if a threat is detected.
+        
+        Args:
+            async_generator: Async iterable yielding strings
+            canary: Canary data from protect_input
+            **context: Additional context
+            
+        Yields:
+            str: The safe chunks
+            
+        Raises:
+            StreamBlockedError: If the stream contains restricted content (e.g. PII leak, Canary leak)
+        """
+        buffer = ""
+        async for chunk in async_generator:
+            result = await self.aprotect_stream_chunk(chunk, buffer, canary, **context)
+            if result.get("blocked"):
+                if getattr(self, "webhook", None):
+                    # Ensure webhook is triggered on blocked streams too
+                    self.webhook.notify(result, None)
+                from .exceptions import StreamBlockedError
+                raise StreamBlockedError(reason=result["reason"], result_dict=result)
+            
+            buffer += chunk
+            yield result["text"]

@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-01-25T14:28:09.326144",
+  "dataset_size": 10674,
+  "train_size": 7471,
+  "val_size": 1601,
+  "test_size": 1602,
+  "results": [
+    {
+      "model": "Random Forest",
+      "val_accuracy": 1.0,
+      "val_precision": 1.0,
+      "val_recall": 1.0,
+      "val_f1": 1.0,
+      "test_accuracy": 1.0,
+      "test_precision": 1.0,
+      "test_recall": 1.0,
+      "test_f1": 1.0,
+      "model_path": "E:\\SecurePrompt\\promptshield\\models\\random_forest_expanded.pkl"
+    },
+    {
+      "model": "Logistic Regression",
+      "val_accuracy": 0.9962523422860712,
+      "val_precision": 1.0,
+      "val_recall": 0.9862068965517241,
+      "val_f1": 0.9930555555555556,
+      "test_accuracy": 0.9987515605493134,
+      "test_precision": 1.0,
+      "test_recall": 0.9954128440366973,
+      "test_f1": 0.9977011494252873,
+      "model_path": "E:\\SecurePrompt\\promptshield\\models\\logistic_regression_expanded.pkl"
+    },
+    {
+      "model": "SVM",
+      "val_accuracy": 0.9993753903810119,
+      "val_precision": 1.0,
+      "val_recall": 0.9977011494252873,
+      "val_f1": 0.998849252013809,
+      "test_accuracy": 1.0,
+      "test_precision": 1.0,
+      "test_recall": 1.0,
+      "test_f1": 1.0,
+      "model_path": "E:\\SecurePrompt\\promptshield\\models\\svm_expanded.pkl"
+    }
+  ]
+}

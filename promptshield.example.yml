@@ -1,0 +1,27 @@
+# PromptShield Configuration File
+# Use with: shield = Shield.from_config("promptshield.yml")
+
+# Choose a preset (fast | balanced | strict | secure | paranoid)
+preset: balanced
+
+# Webhook alerts: Fire an HTTP POST on every blocked threat
+# webhook_url: https://hooks.slack.com/services/T.../B.../xxx
+# webhook_min_threat: 0.5       # Only alert on threats above this level
+# webhook_include_input: false  # Don't send the raw input to the webhook
+
+# Allowlist: Phrases that should NEVER be blocked
+# allowlist_file: safe_phrases.txt
+allowlist:
+  - "how do i reset my password"
+  - "what is your refund policy"
+
+# Custom patterns: Regex patterns that should ALWAYS be blocked
+custom_patterns:
+  - "DROP TABLE"
+  - "rm -rf"
+  - "exec\\s*\\("
+
+# Override individual settings (these override the preset)
+# session_tracking: true
+# rate_limiting: true
+# pii_detection: true

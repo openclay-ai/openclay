@@ -44,15 +44,15 @@ if result['blocked']:
 | **Privacy** | 100% Local | Local | Cloud |
 | **F1 Score** | 0.97 (RF) / 0.96 (DeBERTa) | ~0.60 | ~0.95 |
 | **ML Models** | 4 + DeBERTa | None | Black box |
-| **Async** |  Native | DIY | Varies |
+| **Async** | ✅ Native | DIY | Varies |
 
 ### What We Block
--  Prompt injection attacks (direct + indirect)
--  Jailbreak attempts (DAN, persona replacement)
--  System prompt extraction
--  PII leakage
--  Session anomalies
--  Encoded/obfuscated attacks (Base64, URL, Unicode)
+- 🛡️ Prompt injection attacks (direct + indirect)
+- 🎭 Jailbreak attempts (DAN, persona replacement)
+- 🔑 System prompt extraction
+- 🔒 PII leakage
+- 📊 Session anomalies
+- 🔤 Encoded/obfuscated attacks (Base64, URL, Unicode)
 
 ---
 
@@ -65,6 +65,37 @@ Shield.fast()       # ~1ms  - High throughput (pattern matching only)
 Shield.balanced()   # ~2ms  - Production default (patterns + session tracking)
 Shield.strict()     # ~7ms  - Sensitive apps (+ 1 ML model + PII detection)
 Shield.secure()     # ~12ms - Maximum security (4 ML models ensemble)
+```
+
+---
+
+## New in v2.7.0 (Streaming & Output Protection)
+
+### Streaming LLM Output Scanning
+Securely wrap real-time LLM token streams to detect leaked PII or injected prompts before the full response finishes generating.
+```python
+# Auto-scans generator stream chunks in real-time
+for safe_chunk in shield.protect_stream(llm.stream("Summarize...")):
+    print(safe_chunk, end="")
+```
+
+### Upgraded Zero-Leakage Classical ML
+The `random_forest`, `logistic_regression`, `linear_svc`, and `gradient_boosting` ensemble models were retrained from scratch on a curated 14K dataset to completely eliminate "data leakage" false positives (e.g., blocking benign math/conversion queries). Combine with DeBERTa via `Shield.balanced()` for optimal F1 performance.
+
+---
+
+## New in v2.6.0 (Developer Experience)
+
+### YAML Configuration
+Launch shields declaratively without changing application code.
+```python
+shield = Shield.from_config("promptshield.yml")
+```
+
+### Slack / Teams Webhooks
+Instantly trigger webhooks whenever high-severity threats are blocked natively.
+```python
+shield = Shield.balanced(webhook_url="https://hooks.slack.com/...")
 ```
 
 ---
@@ -130,9 +161,9 @@ Pre-trained models: [neuralchemy/prompt-injection-detector](https://huggingface.
 
 ## Documentation
 
- **[Full Documentation](DOCUMENTATION.md)** — Complete guide with framework integrations
+📖 **[Full Documentation](DOCUMENTATION.md)** — Complete guide with framework integrations
 
-**[Quickstart Guide](QUICKSTART.md)** — Get running in 5 minutes
+🚀 **[Quickstart Guide](QUICKSTART.md)** — Get running in 5 minutes
 
 ---
 

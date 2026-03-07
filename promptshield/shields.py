@@ -329,7 +329,7 @@ class Shield:
         
         # 1. Load Vectorizer (shared TF-IDF, trained on core split — zero leakage)
         try:
-            vec_path = os.path.join(models_dir, "tfidf_vectorizer.pkl")
+            vec_path = os.path.join(models_dir, "tfidf_core.pkl")
             if os.path.exists(vec_path):
                 self.vectorizer = joblib.load(vec_path)
             else:
@@ -340,13 +340,12 @@ class Shield:
             return
 
         # 2. Load Models
-        # Filename map for new leak-free models (trained on neuralchemy/Prompt-injection-dataset v2)
+        # Filename map for leak-free models trained on core dataset
         filename_map = {
             "logistic_regression": "logistic_regression.pkl",
-            "random_forest":       "random_forest.pkl",
+            "random_forest":       "rf_core.pkl",
             "linear_svc":          "linear_svc.pkl",
             "gradient_boosting":   "gradient_boosting.pkl",
-            # Legacy aliases
             "svm":                 "linear_svc.pkl",
         }
 
@@ -404,49 +403,49 @@ class Shield:
         Returns:
             Threat score (0.0 - 1.0)
         """
-        if not self.models or not hasattr(self, 'vectorizer'):
-            # Check for DeBERTa-only setup (no vectorizer needed)
-            deberta_data = self.models.get("deberta")
-            if deberta_data and deberta_data.get("status") == "active":
-                try:
-                    pipe = deberta_data["model"]
-                    result = pipe(text[:512])[0]
-                    # LABEL_1 = attack in our model
-                    if result["label"] in ("LABEL_1", "1", 1):
-                        return result["score"]
-                    else:
-                        return 1.0 - result["score"]
-                except Exception:
-                    pass
-            return 0.0
-
         try:
-            X = self.vectorizer.transform([text])
             predictions = []
             probabilities = []
+            
+            # Pre-compute TF-IDF vectorization only if sklearn models are present
+            X = None
+            if hasattr(self, 'vectorizer') and any(m.get("type") == "sklearn" for m in self.models.values()):
+                X = self.vectorizer.transform([text])
 
             for model_name, model_data in self.models.items():
                 if model_data.get("status") != "active":
                     continue
+                
                 model = model_data.get("model")
                 if model is None:
                     continue
 
                 try:
                     if model_data.get("type") == "deberta":
-                        # DeBERTa: use pipeline directly
+                        # DeBERTa HuggingFace Pipeline
                         result = model(text[:512])[0]
-                        prob = result["score"] if result["label"] in ("LABEL_1", "1", 1) else 1.0 - result["score"]
+                        
+                        # In HF pipelines, label 'LABEL_1' usually means positive class (attack)
+                        # We need to compute the probability of it being an *attack*
+                        prob = result["score"] if result["label"] in ("LABEL_1", "1", 1) else (1.0 - result["score"])
+                        
                         predictions.append(1 if prob >= 0.5 else 0)
                         probabilities.append(prob)
-                    else:
+                        
+                    elif model_data.get("type") == "sklearn" and X is not None:
+                        # Scikit-Learn Model
                         pred = model.predict(X)[0]
-                        predictions.append(pred)
+                        predictions.append(int(pred))
+                        
                         if hasattr(model, 'predict_proba'):
-                            prob = model.predict_proba(X)[0]
-                            probabilities.append(prob[1] if len(prob) > 1 else prob[0])
+                            prob_arr = model.predict_proba(X)[0]
+                            # prob_arr[1] is the probability of class 1 (attack)
+                            prob = prob_arr[1] if len(prob_arr) > 1 else prob_arr[0]
+                            probabilities.append(float(prob))
                         else:
+                            # E.g., LinearSVC doesn't always have predict_proba enabled
                             probabilities.append(float(pred))
+                            
                 except Exception as e:
                     print(f"⚠️  Model {model_name} prediction failed: {e}")
                     continue
@@ -454,14 +453,24 @@ class Shield:
             if not predictions:
                 return 0.0
 
+            # Ensemble Logic
             attack_votes = sum(predictions)
             vote_ratio   = attack_votes / len(predictions)
-            avg_prob     = sum(probabilities) / len(probabilities) if probabilities else 0.0
-            threat_score = (0.4 * vote_ratio) + (0.6 * avg_prob)
-            return min(threat_score, 1.0)
+            
+            # Penalize highly confident false positives by requiring a threshold of votes
+            if vote_ratio < 0.3:
+                # If very few models voted 'attack' (e.g. 1 out of 4), heavily penalize the probability average
+                # This prevents one overfitted scikit-learn model from dragging the score to 0.95
+                avg_prob = (sum(probabilities) / len(probabilities)) * 0.3
+            else:
+                avg_prob = sum(probabilities) / len(probabilities) if probabilities else 0.0
+            
+            # Weighted ensemble score: heavily favor actual votes over pure raw probabilities
+            threat_score = (0.7 * vote_ratio) + (0.3 * avg_prob)
+            return float(min(threat_score, 1.0))
 
         except Exception as e:
-            print(f"⚠️  ML model check failed: {e}")
+            print(f"⚠️  ML ensemble check failed: {e}")
             return 0.0
 
     
@@ -827,6 +836,95 @@ class Shield:
             "output": model_output,
             "latency_ms": latency_ms
         }
+    
+    def protect_stream_chunk(
+        self,
+        chunk: str,
+        buffer: Optional[str] = None,
+        canary: Optional[Dict] = None,
+        **context,
+    ) -> Dict:
+        """
+        Synchronously check a single streaming chunk.
+        
+        Args:
+            chunk: Current text chunk from stream
+            buffer: Accumulated text so far (for canary detection)
+            canary: Canary data from protect_input
+            **context: Additional context
+            
+        Returns:
+            {"blocked": bool, "text": str, "reason": str|None}
+        """
+        full_text = (buffer or "") + chunk
+
+        # Canary check
+        if canary and self.config["canary"]:
+            if self.config["canary_mode"] == "crypto":
+                from .security.canary_crypto import verify_canary_leak
+                is_leaked, reason = verify_canary_leak(full_text, canary)
+                if is_leaked:
+                    return {
+                        "blocked": True,
+                        "text": "",
+                        "reason": f"canary_leak:{reason}",
+                    }
+            else:
+                from .methods import detect_canary
+                if detect_canary(full_text, canary.get("canary", "")):
+                    return {
+                        "blocked": True,
+                        "text": "",
+                        "reason": "canary_leak",
+                    }
+
+        # PII check on chunk (synchronous)
+        if self.config["pii_detection"]:
+            from .methods import pii_scan
+            findings = pii_scan(full_text)
+            if findings:
+                return {
+                    "blocked": True,
+                    "text": "",
+                    "reason": "pii_in_stream",
+                    "findings": findings,
+                }
+
+        return {"blocked": False, "text": chunk, "reason": None}
+
+    def protect_stream(
+        self,
+        generator,
+        canary: Optional[Dict] = None,
+        **context,
+    ):
+        """
+        Wrap a synchronous text generator to automatically scan for threats mid-generation.
+        Raises StreamBlockedError if a threat is detected.
+        
+        Args:
+            generator: Synchronous iterable yielding strings
+            canary: Canary data from protect_input
+            **context: Additional context
+            
+        Yields:
+            str: The safe chunks
+            
+        Raises:
+            StreamBlockedError: If the stream contains restricted content (e.g. PII leak, Canary leak)
+        """
+        buffer = ""
+        for chunk in generator:
+            result = self.protect_stream_chunk(chunk, buffer, canary, **context)
+            if result.get("blocked"):
+                if getattr(self, "webhook", None):
+                    # Ensure webhook is triggered on blocked streams too
+                    self.webhook.notify(result, None)
+                from .exceptions import StreamBlockedError
+                raise StreamBlockedError(reason=result["reason"], result_dict=result)
+            
+            buffer += chunk
+            yield result["text"]
     
     # _check_ml_models is defined above (lines ~329-396) — duplicate stub removed
     

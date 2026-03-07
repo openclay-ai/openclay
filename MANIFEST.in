@@ -1,0 +1,2 @@
+recursive-include promptshield/attack_db *.json
+recursive-include promptshield/models *.pkl
