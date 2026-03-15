@@ -1,0 +1,74 @@
+site_name: PromptShield
+site_description: Production-Grade LLM Security Framework
+site_url: https://doc.neuralchemy.in
+repo_url: https://github.com/Neural-alchemy/promptshield
+repo_name: Neural-alchemy/promptshield
+
+theme:
+  name: material
+  logo: assets/logo.png
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: google
+            show_root_heading: true
+            show_source: false
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+  - Extensibility & Integrations:
+    - AI Frameworks (LangChain, LiteLLM): guides/integrations.md
+  - Core Modules:
+    - Output Engine: guides/output-engine.md
+  - API Reference:
+    - Shield API: api/shield.md
+    - Callbacks & Integrations: api/integrations.md
+    - Telemetry & Observability: api/telemetry.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html

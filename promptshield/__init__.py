@@ -29,14 +29,7 @@ from .shields import Shield, register_component, ShieldComponent
 from .shields_async import AsyncShield
 from .exceptions import StreamBlockedError, PromptShieldError
 
-__all__ = [
-    "Shield",
-    "AsyncShield",
-    "register_component",
-    "ShieldComponent",
-    "StreamBlockedError",
-    "PromptShieldError",
-]
+
 
 # Legacy shields (deprecated but supported)
 from .shields import InputShield_L5, OutputShield_L5, AgentShield_L3
@@ -66,6 +59,8 @@ from .security import (
 from .pattern_manager import PatternManager
 from .rate_limiting import AdaptiveRateLimiter
 from .session_anomaly import SessionAnomalyDetector
+from .output_engine import OutputEngine
+from .output_filter import OutputFilter
 
 # PII detection
 from .pii import (
@@ -81,6 +76,9 @@ from .training import DatasetValidator
 
 # Testing
 from .testing import PromptShieldEvasionTester
+
+# Telemetry
+from .telemetry import PromptShieldTelemetry, trace_shield_call, telemetry
 
 __all__ = [
     # Main Shield API (v2.0)
@@ -115,6 +113,8 @@ __all__ = [
     "PatternManager",
     "AdaptiveRateLimiter",
     "SessionAnomalyDetector",
+    "OutputEngine",
+    "OutputFilter",
     "ContextualPIIDetector",
     "PIIContext",
     "RedactionMode",
@@ -122,4 +122,9 @@ __all__ = [
     "smart_redact",
     "DatasetValidator",
     "PromptShieldEvasionTester",
+    
+    # Observability
+    "PromptShieldTelemetry",
+    "trace_shield_call",
+    "telemetry",
 ]

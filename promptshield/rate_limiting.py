@@ -9,7 +9,9 @@ import time
 from collections import defaultdict
 from threading import Lock
 from typing import Dict, Optional
+import logging
 
+logger = logging.getLogger("promptshield.rate_limiting")
 
 class AdaptiveRateLimiter:
     """
@@ -210,8 +212,7 @@ class AdaptiveRateLimiter:
                 # Keep block counts for audit
             
             if users_to_remove:
-                print(f"🧹 Cleaned up {len(users_to_remove)} inactive users")
-
+                logger.info("🧹 Cleaned up %d inactive users", len(users_to_remove))
 
 # Example usage
 if __name__ == "__main__":

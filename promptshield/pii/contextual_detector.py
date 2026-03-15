@@ -257,6 +257,15 @@ class ContextualPIIDetector:
         }
 
 
+# Global shared detector to avoid recompiling regexes
+_GLOBAL_DETECTOR = None
+
+def get_detector() -> ContextualPIIDetector:
+    global _GLOBAL_DETECTOR
+    if _GLOBAL_DETECTOR is None:
+        _GLOBAL_DETECTOR = ContextualPIIDetector()
+    return _GLOBAL_DETECTOR
+
 # Helper functions for common use cases
 def extract_user_pii(user_input: str) -> List[str]:
     """
@@ -264,7 +273,7 @@ def extract_user_pii(user_input: str) -> List[str]:
     
     Used to identify user's own PII for later comparison.
     """
-    detector = ContextualPIIDetector()
+    detector = get_detector()
     
     # Create temporary context (all PII is treated as user's)
     temp_context = PIIContext(
@@ -291,7 +300,7 @@ def is_safe_output(
     Returns:
         Tuple of (is_safe, reason)
     """
-    detector = ContextualPIIDetector()
+    detector = get_detector()
     
     # Extract user's PII from input
     user_pii = extract_user_pii(user_input)

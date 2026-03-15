@@ -11,7 +11,7 @@ Usage:
 """
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from .shields import Shield
 
@@ -34,6 +34,7 @@ class AsyncShield(Shield):
         # Async usage
         result = await shield.aprotect_input("user text", "system prompt")
         result = await shield.aprotect_output("model output", canary=canary)
+        result = await shield.aprotect_tool_call("tool_name", {"key": "value"})
     """
 
     async def aprotect_input(
@@ -75,6 +76,10 @@ class AsyncShield(Shield):
         canary: Optional[Dict] = None,
         user_id: Optional[str] = None,
         user_input: Optional[str] = None,
+        enforce_embeddings: bool = False,
+        forbidden_vectors: Optional[List[str]] = None,
+        vector_db_client: Optional[Callable[[List[float]], float]] = None,
+        input_threat_level: float = 0.0,
         **context,
     ) -> Dict:
         """
@@ -85,6 +90,10 @@ class AsyncShield(Shield):
             canary: Canary data from protect_input
             user_id: User identifier
             user_input: Original user input (for PII context)
+            enforce_embeddings: Enable embedding guard (DLP)
+            forbidden_vectors: List of sensitive strings to match against
+            vector_db_client: BYO-VDB callback for enterprise-scale DLP
+            input_threat_level: Threat score from protect_input (lowers thresholds)
             **context: Additional context
 
         Returns:
@@ -96,6 +105,40 @@ class AsyncShield(Shield):
             canary=canary,
             user_id=user_id,
             user_input=user_input,
+            enforce_embeddings=enforce_embeddings,
+            forbidden_vectors=forbidden_vectors,
+            vector_db_client=vector_db_client,
+            input_threat_level=input_threat_level,
+            **context,
+        )
+
+    async def aprotect_tool_call(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        allowed_tools: Optional[List[str]] = None,
+        **context,
+    ) -> Dict:
+        """
+        Async version of protect_tool_call().
+
+        Validates MCP/Agent tool call arguments without blocking the event loop.
+        Essential for async agentic frameworks (LangGraph, CrewAI).
+
+        Args:
+            tool_name: Name of the tool being called
+            arguments: JSON arguments being sent to the tool
+            allowed_tools: Whitelist of permitted tool names
+            **context: Additional context
+
+        Returns:
+            Same dict as protect_tool_call()
+        """
+        return await asyncio.to_thread(
+            self.protect_tool_call,
+            tool_name,
+            arguments,
+            allowed_tools=allowed_tools,
             **context,
         )
 

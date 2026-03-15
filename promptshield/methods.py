@@ -7,7 +7,9 @@ import urllib.parse
 import json
 import glob
 import os
-import numpy as np
+import logging
+
+logger = logging.getLogger("promptshield.methods")
 
 # Make sentence_transformers optional
 try:
@@ -16,7 +18,7 @@ try:
 except ImportError:
     SentenceTransformer = None
     SENTENCE_TRANSFORMERS_AVAILABLE = False
-    print("[WARNING] sentence_transformers not available - semantic matching disabled")
+    logger.warning("sentence_transformers not available - semantic matching disabled")
 
 import secrets
 import string
@@ -78,7 +80,7 @@ def load_attack_patterns(path="attack_db"):
         _RAPTURE_PATTERNS["exact"].add(text.lower())
         loaded += 1
 
-    print(f"[PromptShield] Loaded {loaded} attack patterns")
+    logger.info("Loaded %d attack patterns", loaded)
 
 # ---------- NORMALIZATION -----------
 
@@ -277,7 +279,7 @@ def load_semantic_engine(attack_texts: list):
     global _EMBED_MODEL, _ATTACK_EMBEDDINGS, _ATTACK_TEXTS
     
     if not SENTENCE_TRANSFORMERS_AVAILABLE:
-        print("[WARNING] Sentence transformers not available, skipping semantic engine")
+        logger.warning("Sentence transformers not available, skipping semantic engine")
         return
 
     if not attack_texts:
@@ -303,6 +305,8 @@ def semantic_match(text: str):
     """
     if not SENTENCE_TRANSFORMERS_AVAILABLE or not text or _EMBED_MODEL is None:
         return False, 0.0
+
+    import numpy as np
 
     query_vec = _EMBED_MODEL.encode(
         [text],

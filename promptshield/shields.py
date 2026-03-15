@@ -7,7 +7,12 @@ Replace fixed levels (L1/L3/L5/L7) with flexible component composition.
 
 from typing import Any, Dict, List, Optional, Callable
 from dataclasses import dataclass
+import logging
 import time
+
+from .telemetry import trace_shield_call
+
+logger = logging.getLogger("promptshield")
 
 
 @dataclass
@@ -168,6 +173,19 @@ class Shield:
         cache_predictions: bool = True,
         async_mode: bool = False,
         
+        # Embeddings (v3.0.0)
+        enforce_embeddings: bool = False,
+        embedding_model: str = "all-MiniLM-L6-v2",
+        
+        # Output Engine (v3.0.0)
+        sensitive_terms: Optional[List[str]] = None,
+        honeypot_tokens: Optional[List[str]] = None,
+        enable_web_fallback: bool = False,
+        
+        # OutputFilter — user-defined sensitive data DLP (v3.1.0)
+        output_filter: Optional[List[str]] = None,
+        output_filter_threshold: float = 5.0,
+        
         # Custom components
         custom_components: Optional[List[str]] = None,
         
@@ -235,6 +253,8 @@ class Shield:
             "webhook_include_input": webhook_include_input,
             "cache_predictions": cache_predictions,
             "async_mode": async_mode,
+            "enforce_embeddings": enforce_embeddings,
+            "embedding_model": embedding_model,
             **kwargs
         }
         
@@ -259,9 +279,44 @@ class Shield:
         # Load ML models if configured
         if self.config["models"]:
             self._load_ml_models()
+            
+        # Load Embeddings if configured
+        if self.config.get("enforce_embeddings"):
+            self._load_embeddings()
+        else:
+            self.embedder = None
         
         # Initialize subsystems
         self._init_subsystems()
+        
+        # Build OutputFilter if user supplied sensitive data (v3.1.0)
+        self._output_filter = None
+        if output_filter:
+            try:
+                from .output_filter import OutputFilter
+                self._output_filter = OutputFilter(
+                    sensitive_data=output_filter,
+                    threshold=output_filter_threshold,
+                )
+            except ImportError:
+                logger.warning(
+                    "rank-bm25 not installed — OutputFilter disabled. "
+                    "Install with: pip install rank-bm25"
+                )
+        
+        # Initialize Output Engine (v3.0.0 — multi-layer DLP pipeline)
+        self.output_engine = None
+        if sensitive_terms or honeypot_tokens or enable_web_fallback or self._output_filter:
+            from .output_engine import OutputEngine
+            self.output_engine = OutputEngine(
+                sensitive_terms=sensitive_terms,
+                honeypot_tokens=honeypot_tokens,
+                embedding_threshold=0.78,
+                output_filter=self._output_filter,
+            )
+            # Enable Layer 5: Web Search Fallback if requested
+            if enable_web_fallback:
+                self.output_engine.enable_web_fallback = True
     
     def _build_pipeline(self, custom_components: List[str]):
         """Build component pipeline based on config"""
@@ -292,9 +347,8 @@ class Shield:
                 history_window=self.config["session_history"]
             )
         
-        # 4. ML models (if specified)
-        if self.config["models"]:
-            self._load_ml_models()
+        # 4. ML models — loaded in __init__ after _build_pipeline() returns
+        # (removed duplicate _load_ml_models() call that was here)
         
         # 5. Canary generation
         if self.config["canary"]:
@@ -333,10 +387,10 @@ class Shield:
             if os.path.exists(vec_path):
                 self.vectorizer = joblib.load(vec_path)
             else:
-                print(f"⚠️  Vectorizer not found at {vec_path}. ML models disabled.")
+                logger.warning("Vectorizer not found at %s. ML models disabled.", vec_path)
                 return
         except Exception as e:
-            print(f"⚠️  Failed to load vectorizer: {e}")
+            logger.warning("Failed to load vectorizer: %s", e)
             return
 
         # 2. Load Models
@@ -371,9 +425,9 @@ class Shield:
                             "type": "deberta",
                             "status": "active"
                         }
-                        print("  ✅ Loaded deberta (neuralchemy/prompt-injection-deberta)")
+                        logger.info("Loaded deberta (neuralchemy/prompt-injection-deberta)")
                     except Exception as e:
-                        print(f"⚠️  Failed to load DeBERTa: {e}")
+                        logger.warning("Failed to load DeBERTa: %s", e)
 
                 else:
                     fname = filename_map.get(model_name, f"{model_name}.pkl")
@@ -386,13 +440,27 @@ class Shield:
                             "type": "sklearn",
                             "status": "active"
                         }
-                        print(f"  ✅ Loaded {model_name} ({fname})")
+                        logger.info("Loaded %s (%s)", model_name, fname)
                     else:
-                        print(f"⚠️  Model file not found: {fname}")
+                        logger.warning("Model file not found: %s", fname)
 
             except Exception as e:
-                print(f"⚠️  Failed to load model {model_name}: {e}")
-    
+                logger.warning("Failed to load model %s: %s", model_name, e)
+                
+    def _load_embeddings(self):
+        """Load sentence-transformers model for output embedding protection.
+        Degrades gracefully if loading fails — embedding guard is disabled, not crashed."""
+        self.embedder = None
+        self._embedding_errors = 0
+        try:
+            from sentence_transformers import SentenceTransformer
+            self.embedder = SentenceTransformer(self.config["embedding_model"])
+            logger.info("Loaded embedding model (%s)", self.config['embedding_model'])
+        except ImportError:
+            logger.warning("sentence-transformers not installed. Embedding guard disabled. Install with: pip install sentence-transformers")
+        except Exception as e:
+            logger.warning("Failed to load embedding model: %s — embedding guard disabled", e)
+
     def _check_ml_models(self, text: str) -> float:
         """
         Check text against ML models with ensemble voting.
@@ -447,7 +515,7 @@ class Shield:
                             probabilities.append(float(pred))
                             
                 except Exception as e:
-                    print(f"⚠️  Model {model_name} prediction failed: {e}")
+                    logger.warning("Model %s prediction failed: %s", model_name, e)
                     continue
 
             if not predictions:
@@ -470,7 +538,7 @@ class Shield:
             return float(min(threat_score, 1.0))
 
         except Exception as e:
-            print(f"⚠️  ML ensemble check failed: {e}")
+            logger.warning("ML ensemble check failed: %s", e)
             return 0.0
 
     
@@ -581,6 +649,7 @@ class Shield:
         defaults.update(kwargs)
         return cls(**defaults)
     
+    @trace_shield_call("input")
     def protect_input(
         self,
         user_input: str,
@@ -748,12 +817,17 @@ class Shield:
             }
         }
     
+    @trace_shield_call("output")
     def protect_output(
         self,
         model_output: str,
         canary: Optional[Dict] = None,
         user_id: Optional[str] = None,
         user_input: Optional[str] = None,
+        enforce_embeddings: bool = False,
+        forbidden_vectors: Optional[List[str]] = None,
+        vector_db_client: Optional[Callable[[List[float]], float]] = None,
+        input_threat_level: float = 0.0,
         **context
     ) -> Dict:
         """
@@ -764,6 +838,10 @@ class Shield:
             canary: Canary data from protect_input
             user_id: User identifier
             user_input: Original user input (for PII context)
+            enforce_embeddings: Enable matching output against forbidden_vectors or custom DB
+            forbidden_vectors: List of strings (e.g. original prompt) to not leak (Small Scale)
+            vector_db_client: A function that takes an embedding list and returns the max similarity score (Enterprise BYO-VDB)
+            input_threat_level: From protect_input, dynamically lowers thresholds if suspicious
             **context: Additional context
         
         Returns:
@@ -828,7 +906,82 @@ class Shield:
                     "latency_ms": latency_ms,
                     "metadata": {"component": "pii_detector"}
                 }
-        
+
+        # 3. Output Engine — Multi-layer DLP pipeline (v3.0.0)
+        if getattr(self, 'output_engine', None):
+            engine_result = self.output_engine.scan(
+                output_text=model_output,
+                input_text=user_input,
+                embedder=getattr(self, 'embedder', None),
+                forbidden_vectors=forbidden_vectors,
+                vector_db_client=vector_db_client,
+                input_threat_level=input_threat_level,
+            )
+            if engine_result.get("blocked"):
+                engine_result["latency_ms"] = (time.time() - start_time) * 1000
+                return engine_result
+            # Bloom filter fast-path: definitely clean
+            if engine_result.get("fast_path"):
+                latency_ms = (time.time() - start_time) * 1000
+                return {
+                    "blocked": False,
+                    "output": model_output,
+                    "latency_ms": latency_ms,
+                    "metadata": engine_result.get("metadata", {}),
+                }
+
+        # 4. Legacy Embedding Guard (fallback for users without OutputEngine)
+        do_embed = enforce_embeddings or self.config.get("enforce_embeddings")
+        if do_embed and (forbidden_vectors or vector_db_client) and getattr(self, 'embedder', None) and not getattr(self, 'output_engine', None):
+            from sentence_transformers import util
+            
+            # Dynamic threshold based on input suspiciousness (session state propagation)
+            threshold = 0.78
+            if input_threat_level > 0.8:
+                threshold = 0.60
+            elif input_threat_level > 0.6:
+                threshold = 0.70
+                
+            try:
+                # 1. Embed the LLM's Output once
+                output_emb = self.embedder.encode(model_output, convert_to_tensor=True)
+                
+                max_score = 0.0
+                
+                # 2. Check against custom VectorDB (Enterprise BYO-VDB) if provided
+                if vector_db_client:
+                    # Provide the embedding as a standard python list to the engineer's callback
+                    max_score = float(vector_db_client(output_emb.tolist()))
+                
+                # 3. Fallback: check against small local array if provided
+                elif forbidden_vectors:
+                    forbidden_embs = self.embedder.encode(forbidden_vectors, convert_to_tensor=True)
+                    cosine_scores = util.cos_sim(output_emb, forbidden_embs)[0]
+                    max_score = float(cosine_scores.max())
+                
+                # 4. Enforce threshold
+                if max_score > threshold:
+                    return {
+                        "blocked": True,
+                        "reason": "embedding_match_forbidden",
+                        "similarity_score": max_score,
+                        "threshold": threshold,
+                        "metadata": {"component": "embedding_guard"}
+                    }
+                else:
+                    # Provide metadata even if not blocked for testing
+                    latency_ms = (time.time() - start_time) * 1000
+                    return {
+                        "blocked": False,
+                        "output": model_output,
+                        "latency_ms": latency_ms,
+                        "similarity_score": max_score,
+                        "threshold": threshold,
+                        "metadata": {"component": "embedding_guard_passed"}
+                    }
+            except Exception as e:
+                logger.warning("Embedding check failed: %s", e)
+
         latency_ms = (time.time() - start_time) * 1000
         
         return {
@@ -925,8 +1078,85 @@ class Shield:
             
             buffer += chunk
             yield result["text"]
-    
-    # _check_ml_models is defined above (lines ~329-396) — duplicate stub removed
+
+    @trace_shield_call("tool_call")
+    def protect_tool_call(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        allowed_tools: Optional[List[str]] = None,
+        **context
+    ) -> Dict:
+        """
+        Protect MCP/Agent tool calls from malicious argument payloads.
+        """
+        import json
+        start_time = time.time()
+        
+        # 1. Check allowed tools
+        if allowed_tools is not None and tool_name not in allowed_tools:
+            result = {
+                "blocked": True,
+                "reason": "tool_not_allowed",
+                "tool_name": tool_name
+            }
+            if getattr(self, "webhook", None):
+                self.webhook.notify(result, f"Tool Call: {tool_name}")
+            return result
+            
+        # 2. Serialize arguments for scanning (Extract values to avoid JSON syntax confusing ML)
+        def flatten_dict(d):
+            vals = []
+            if isinstance(d, dict):
+                for v in d.values():
+                    vals.extend(flatten_dict(v))
+            elif isinstance(d, list):
+                for v in d:
+                    vals.extend(flatten_dict(v))
+            else:
+                vals.append(str(d))
+            return vals
+            
+        try:
+            arg_string = " ".join(flatten_dict(arguments))
+        except Exception:
+            arg_string = str(arguments)
+            
+        # 3. Fast Pattern Matching
+        if self.config["patterns"]:
+            matched, score, rule = self.pattern_manager.match(arg_string)
+            if matched:
+                result = {
+                    "blocked": True,
+                    "reason": "pattern_match",
+                    "rule": rule,
+                    "threat_level": score,
+                    "metadata": {"component": "tool_guard_patterns", "tool_name": tool_name}
+                }
+                if getattr(self, "webhook", None):
+                    self.webhook.notify(result, arg_string)
+                return result
+                
+        # 4. ML Models
+        if self.config["models"]:
+            ml_threat = self._check_ml_models(arg_string)
+            if ml_threat >= self.config["model_threshold"]:
+                result = {
+                    "blocked": True,
+                    "reason": "ml_detection",
+                    "threat_level": ml_threat,
+                    "metadata": {"component": "tool_guard_ml", "tool_name": tool_name}
+                }
+                if getattr(self, "webhook", None):
+                    self.webhook.notify(result, arg_string)
+                return result
+                
+        latency_ms = (time.time() - start_time) * 1000
+        return {
+            "blocked": False,
+            "threat_level": 0.0,
+            "latency_ms": latency_ms
+        }
     
     def _get_active_components(self) -> List[str]:
         """Get list of active components"""
@@ -946,9 +1176,19 @@ class Shield:
         return active
     
     def get_stats(self) -> Dict:
-        """Get shield statistics"""
+        """Get shield statistics (redacts sensitive config values)"""
+        # Redact sensitive fields from config before exposing
+        _REDACTED_KEYS = {
+            "webhook_url", "allowlist", "custom_patterns",
+            "sensitive_terms", "honeypot_tokens", "output_filter",
+        }
+        safe_config = {
+            k: ("[REDACTED]" if k in _REDACTED_KEYS and v else v)
+            for k, v in self.config.items()
+        }
+        
         stats = {
-            "config": self.config,
+            "config": safe_config,
             "active_components": self._get_active_components()
         }
         
@@ -956,11 +1196,15 @@ class Shield:
         if self.config["rate_limiting"]:
             stats["rate_limiter"] = self.rate_limiter.get_global_stats()
         
-        if self.config ["patterns"]:
+        if self.config["patterns"]:
             stats["pattern_manager"] = self.pattern_manager.get_stats()
         
         if self.config["session_tracking"]:
             stats["session_detector"] = self.session_detector.get_global_stats()
+        
+        # OutputFilter stats
+        if self._output_filter:
+            stats["output_filter"] = self._output_filter.get_stats()
         
         return stats
     

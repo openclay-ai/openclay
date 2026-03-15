@@ -12,6 +12,8 @@ Usage:
 import json
 import time
 import logging
+import hmac
+import hashlib
 from typing import Dict, Any, Optional
 from urllib.request import Request, urlopen
 from urllib.error import URLError
@@ -40,12 +42,15 @@ class WebhookNotifier:
         min_threat_level: float = 0.5,
         timeout: int = 5,
         include_input: bool = False,
+        secret: Optional[str] = None,
     ):
         self.url = url
         self.min_threat_level = min_threat_level
         self.timeout = timeout
         self.include_input = include_input
+        self.secret = secret
         self._stats = {"sent": 0, "failed": 0, "skipped": 0}
+        self._lock = threading.Lock()
     
     def notify(self, result: Dict[str, Any], user_input: Optional[str] = None):
         """
@@ -57,15 +62,17 @@ class WebhookNotifier:
             result: The shield result dictionary from protect_input()
             user_input: The original user input (only included if include_input is True)
         """
-        print(f"[DEBUG notify] called with blocked={result.get('blocked')}, threat={result.get('threat_level')}")
+        logger.debug("notify called with blocked=%s, threat=%s", result.get('blocked'), result.get('threat_level'))
         if not result.get("blocked", False):
-            self._stats["skipped"] += 1
+            with self._lock:
+                self._stats["skipped"] += 1
             return
         
         threat_level = result.get("threat_level", 0.0)
         if threat_level < self.min_threat_level:
-            print(f"[DEBUG notify] skipped: threat_level {threat_level} < {self.min_threat_level}")
-            self._stats["skipped"] += 1
+            logger.debug("notify skipped: threat_level %s < %s", threat_level, self.min_threat_level)
+            with self._lock:
+                self._stats["skipped"] += 1
             return
         
         # Build payload
@@ -83,7 +90,7 @@ class WebhookNotifier:
             # Truncate to avoid sending huge payloads
             payload["input_preview"] = user_input[:200]
         
-        print(f"[DEBUG notify] starting thread for {payload['reason']}")
+        logger.debug("notify starting thread for %s", payload.get('reason'))
         # Fire in background thread to avoid blocking the request
         thread = threading.Thread(
             target=self._send, args=(payload,)
@@ -92,33 +99,48 @@ class WebhookNotifier:
     
     def _send(self, payload: Dict[str, Any]):
         """Send the webhook HTTP POST request."""
-        print(f"[DEBUG _send] thread started")
+        logger.debug("_send thread started")
         try:
             data = json.dumps(payload).encode("utf-8")
+            headers = {"Content-Type": "application/json"}
+            
+            if self.secret:
+                signature = hmac.new(
+                    self.secret.encode("utf-8"), 
+                    data, 
+                    hashlib.sha256
+                ).hexdigest()
+                headers["X-PromptShield-Signature"] = f"sha256={signature}"
+                
             req = Request(
                 self.url,
                 data=data,
-                headers={"Content-Type": "application/json"},
+                headers=headers,
                 method="POST",
             )
             with urlopen(req, timeout=self.timeout) as response:
                 if response.status < 300:
-                    self._stats["sent"] += 1
-                    logger.info(f"Webhook sent: {payload['reason']}")
-                    print(f"[DEBUG] Webhook sent successfully {payload['reason']}")
+                    with self._lock:
+                        self._stats["sent"] += 1
+                    logger.info("Webhook sent: %s", payload.get('reason'))
+                    logger.debug("Webhook sent successfully %s", payload.get('reason'))
                 else:
-                    self._stats["failed"] += 1
-                    logger.warning(f"Webhook returned status {response.status}")
-                    print(f"[DEBUG] Webhook returned status {response.status}")
+                    with self._lock:
+                        self._stats["failed"] += 1
+                    logger.warning("Webhook returned status %s", response.status)
+                    logger.debug("Webhook returned status %s", response.status)
         except URLError as e:
-            self._stats["failed"] += 1
-            logger.warning(f"Webhook failed: {e}")
-            print(f"[DEBUG] Webhook failed with URLError: {e}")
+            with self._lock:
+                self._stats["failed"] += 1
+            logger.warning("Webhook failed: %s", e)
+            logger.debug("Webhook failed with URLError: %s", e)
         except Exception as e:
-            self._stats["failed"] += 1
-            logger.error(f"Webhook error: {e}")
-            print(f"[DEBUG] Webhook threw Exception: {e}")
+            with self._lock:
+                self._stats["failed"] += 1
+            logger.error("Webhook error: %s", e)
+            logger.debug("Webhook threw Exception: %s", e)
     
     def get_stats(self) -> Dict[str, int]:
         """Get webhook delivery statistics."""
-        return dict(self._stats)
+        with self._lock:
+            return dict(self._stats)

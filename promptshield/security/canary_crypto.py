@@ -73,7 +73,6 @@ class CryptoCanaryGenerator:
             "semantic": self._create_semantic_canary(signature),
             "invisible": self._create_invisible_canary(signature),
             "signature": signature,
-            "secret": self.secret,
             "session_id": session_id,
             "partial_signatures": self._create_partial_signatures(signature)
         }
@@ -142,16 +141,15 @@ class CryptoCanaryGenerator:
     def _create_partial_signatures(self, signature: str) -> List[str]:
         """
         Create partial signatures for split-attack detection.
-        If attack splits canary across responses, we can still detect.
+        Optimized to use only first and last 10 chars to save memory/CPU.
         """
-        partials = []
-        
-        # Generate all substrings of length >= 6
-        for i in range(len(signature) - 5):
-            for j in range(i + 6, len(signature) + 1):
-                partials.append(signature[i:j])
-        
-        return partials
+        if len(signature) <= 10:
+            return [signature]
+            
+        return [
+            signature[:10],
+            signature[-10:]
+        ]
     
     def inject_into_prompt(
         self, 

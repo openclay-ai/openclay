@@ -10,6 +10,7 @@ Patterns detected:
 """
 
 import time
+import threading
 from collections import defaultdict
 from typing import Dict, List, Optional
 
@@ -63,6 +64,9 @@ class SessionAnomalyDetector:
         self.session_history = defaultdict(list)  # user_id: [{}, ...]
         self.session_threats = defaultdict(float)  # user_id: threat_score
         self.blocked_sessions = set()  # Set of blocked user_ids
+        
+        # Thread safety lock
+        self._lock = threading.Lock()
     
     def analyze(
         self,
@@ -88,75 +92,76 @@ class SessionAnomalyDetector:
                 "warnings": List[str]
             }
         """
-        # Check if session already blocked
-        if user_id in self.blocked_sessions:
-            return {
-                "action": "block_session",
-                "reason": "session_previously_blocked",
-                "session_threat": 1.0,
-                "patterns_detected": [],
-                "warnings": []
+        with self._lock:
+            # Check if session already blocked
+            if user_id in self.blocked_sessions:
+                return {
+                    "action": "block_session",
+                    "reason": "session_previously_blocked",
+                    "session_threat": 1.0,
+                    "patterns_detected": [],
+                    "warnings": []
+                }
+            
+            # Add to history
+            history = self.session_history[user_id]
+            history.append({
+                "message": message[:200],  # Store first 200 chars
+                "timestamp": time.time(),
+                "threat_level": shield_result.get("threat_level", 0),
+                "blocked": shield_result.get("blocked", False)
+            })
+            
+            # Keep only recent history
+            if len(history) > self.history_window:
+                history.pop(0)
+            
+            self.session_history[user_id] = history
+            
+            # Detect patterns
+            patterns = {
+                "escalation": self._detect_escalation(history),
+                "probing": self._detect_probing(history),
+                "split_attack": self._detect_split_attack(history)
             }
-        
-        # Add to history
-        history = self.session_history[user_id]
-        history.append({
-            "message": message[:200],  # Store first 200 chars
-            "timestamp": time.time(),
-            "threat_level": shield_result.get("threat_level", 0),
-            "blocked": shield_result.get("blocked", False)
-        })
-        
-        # Keep only recent history
-        if len(history) > self.history_window:
-            history.pop(0)
-        
-        self.session_history[user_id] = history
-        
-        # Detect patterns
-        patterns = {
-            "escalation": self._detect_escalation(history),
-            "probing": self._detect_probing(history),
-            "split_attack": self._detect_split_attack(history)
-        }
-        
-        # Calculate session-level threat
-        session_threat = max(
-            p["score"] for p in patterns.values()
-        )
-        
-        self.session_threats[user_id] = session_threat
-        
-        # Detected patterns
-        detected = [
-            name for name, data in patterns.items()
-            if data["detected"]
-        ]
-        
-        # Warnings (suspicious but not blocking)
-        warnings = [
-            name for name, data in patterns.items()
-            if not data["detected"] and data["score"] > 0.5
-        ]
-        
-        # Decision
-        if session_threat >= self.session_block_threshold:
-            self.blocked_sessions.add(user_id)
+            
+            # Calculate session-level threat
+            session_threat = max(
+                p["score"] for p in patterns.values()
+            )
+            
+            self.session_threats[user_id] = session_threat
+            
+            # Detected patterns
+            detected = [
+                name for name, data in patterns.items()
+                if data["detected"]
+            ]
+            
+            # Warnings (suspicious but not blocking)
+            warnings = [
+                name for name, data in patterns.items()
+                if not data["detected"] and data["score"] > 0.5
+            ]
+            
+            # Decision
+            if session_threat >= self.session_block_threshold:
+                self.blocked_sessions.add(user_id)
+                return {
+                    "action": "block_session",
+                    "reason": f"session_anomaly:{','.join(detected)}",
+                    "session_threat": session_threat,
+                    "patterns_detected": detected,
+                    "warnings": warnings
+                }
+            
             return {
-                "action": "block_session",
-                "reason": f"session_anomaly:{','.join(detected)}",
+                "action": "allow",
+                "reason": None,
                 "session_threat": session_threat,
                 "patterns_detected": detected,
                 "warnings": warnings
             }
-        
-        return {
-            "action": "allow",
-            "reason": None,
-            "session_threat": session_threat,
-            "patterns_detected": detected,
-            "warnings": warnings
-        }
     
     def _detect_escalation(self, history: List[Dict]) -> Dict:
         """
@@ -269,37 +274,41 @@ class SessionAnomalyDetector:
     
     def reset_session(self, user_id: str):
         """Reset session history (e.g., after timeout or manual clear)"""
-        self.session_history.pop(user_id, None)
-        self.session_threats.pop(user_id, None)
-        self.blocked_sessions.discard(user_id)
+        with self._lock:
+            self.session_history.pop(user_id, None)
+            self.session_threats.pop(user_id, None)
+            self.blocked_sessions.discard(user_id)
     
     def unblock_session(self, user_id: str):
         """Manually unblock a session (admin function)"""
-        self.blocked_sessions.discard(user_id)
-        self.session_threats[user_id] = 0.0
+        with self._lock:
+            self.blocked_sessions.discard(user_id)
+            self.session_threats[user_id] = 0.0
     
     def get_session_stats(self, user_id: str) -> Dict:
         """Get statistics for a session"""
-        history = self.session_history.get(user_id, [])
-        
-        return {
-            "message_count": len(history),
-            "session_threat": self.session_threats.get(user_id, 0.0),
-            "is_blocked": user_id in self.blocked_sessions,
-            "recent_threats": [h["threat_level"] for h in history[-5:]],
-        }
+        with self._lock:
+            history = self.session_history.get(user_id, [])
+            
+            return {
+                "message_count": len(history),
+                "session_threat": self.session_threats.get(user_id, 0.0),
+                "is_blocked": user_id in self.blocked_sessions,
+                "recent_threats": [h["threat_level"] for h in history[-5:]],
+            }
     
     def get_global_stats(self) -> Dict:
         """Get global anomaly detection statistics"""
-        return {
-            "active_sessions": len(self.session_history),
-            "blocked_sessions": len(self.blocked_sessions),
-            "average_session_threat": (
-                sum(self.session_threats.values()) / len(self.session_threats)
-                if self.session_threats else 0.0
-            ),
-            "blocked_user_ids": list(self.blocked_sessions)
-        }
+        with self._lock:
+            return {
+                "active_sessions": len(self.session_history),
+                "blocked_sessions": len(self.blocked_sessions),
+                "average_session_threat": (
+                    sum(self.session_threats.values()) / len(self.session_threats)
+                    if self.session_threats else 0.0
+                ),
+                "blocked_user_ids": list(self.blocked_sessions)
+            }
 
 
 # Example usage

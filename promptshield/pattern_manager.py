@@ -9,6 +9,7 @@ Thread-safe pattern manager with:
 """
 
 import json
+import logging
 import os
 import re
 import threading
@@ -19,6 +20,8 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+logger = logging.getLogger("promptshield")
 
 
 class PatternManager:
@@ -62,7 +65,7 @@ class PatternManager:
         patterns = {}
         
         if not os.path.exists(self.patterns_dir):
-            print(f"⚠️  Pattern directory not found: {self.patterns_dir}")
+            logger.warning("Pattern directory not found: %s", self.patterns_dir)
             return patterns
         
         # Recursively find all JSON files
@@ -88,9 +91,9 @@ class PatternManager:
                             patterns[pattern_id] = data
                             
             except Exception as e:
-                print(f"⚠️  Failed to load {json_file}: {e}")
+                logger.warning("Failed to load %s: %s", json_file, e)
         
-        print(f"✓ Loaded {len(patterns)} attack patterns")
+        logger.info("Loaded %d attack patterns", len(patterns))
         return patterns
     
     def _validate_patterns(self, patterns: Dict) -> bool:
@@ -108,12 +111,12 @@ class PatternManager:
             # Check required fields
             for field in required_fields:
                 if field not in pattern:
-                    print(f"⚠️  Pattern {pattern_id} missing required field: {field}")
+                    logger.warning("Pattern %s missing required field: %s", pattern_id, field)
                     return False
             
             # Check has at least one match method
             if not any(k in pattern for k in ['pattern', 'regex', 'keywords']):
-                print(f"⚠️  Pattern {pattern_id} has no match criterion")
+                logger.warning("Pattern %s has no match criterion", pattern_id)
                 return False
         
         return True
@@ -125,7 +128,7 @@ class PatternManager:
         Returns:
             True if reload successful, False otherwise
         """
-        print("🔄 Hot-reloading patterns...")
+        logger.info("Hot-reloading patterns...")
         
         try:
             # Load new patterns
@@ -133,7 +136,7 @@ class PatternManager:
             
             # Validate
             if not self._validate_patterns(new_patterns):
-                print("✗ Pattern validation failed - keeping old patterns")
+                logger.error("Pattern validation failed - keeping old patterns")
                 return False
             
             # Atomic swap with write lock
@@ -144,13 +147,12 @@ class PatternManager:
                 self.last_reload = time.time()
             
             new_count = len(new_patterns)
-            print(f"✓ Patterns reloaded: {old_count} → {new_count}")
-            print(f"  Version: {self.version}")
+            logger.info("Patterns reloaded: %d → %d (version: %s)", old_count, new_count, self.version)
             
             return True
             
         except Exception as e:
-            print(f"✗ Hot-reload failed: {e}")
+            logger.error("Hot-reload failed: %s", e)
             return False
     
     @staticmethod
@@ -416,24 +418,24 @@ class PatternAutoReloader:
             
             current_mtime = self._get_directory_mtime()
             if current_mtime > self._last_mtime:
-                print("📁 Pattern files changed, triggering hot-reload...")
+                logger.info("Pattern files changed, triggering hot-reload...")
                 if self.pattern_manager.hot_reload():
                     self._last_mtime = current_mtime
     
     def start(self):
         """Start auto-reload daemon"""
         if self._running:
-            print("⚠️  Auto-reloader already running")
+            logger.warning("Auto-reloader already running")
             return
         
         self._running = True
         self._thread = threading.Thread(target=self._reload_loop, daemon=True)
         self._thread.start()
-        print(f"✓ Pattern auto-reloader started (interval: {self.check_interval}s)")
+        logger.info("Pattern auto-reloader started (interval: %ds)", self.check_interval)
     
     def stop(self):
         """Stop auto-reload daemon"""
         self._running = False
         if self._thread:
             self._thread.join(timeout=5)
-        print("✓ Pattern auto-reloader stopped")
+        logger.info("Pattern auto-reloader stopped")

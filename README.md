@@ -1,5 +1,4 @@
 # PromptShields
-**⚠️This project is evolving rapidly occasional instability is expected** 
 
 **Secure AI Applications in 3 Lines of Code**
 
@@ -44,15 +43,15 @@ if result['blocked']:
 | **Privacy** | 100% Local | Local | Cloud |
 | **F1 Score** | 0.97 (RF) / 0.96 (DeBERTa) | ~0.60 | ~0.95 |
 | **ML Models** | 4 + DeBERTa | None | Black box |
-| **Async** | Native | DIY | Varies |
+| **Async** | ✅ Native | DIY | Varies |
 
 ### What We Block
-- Prompt injection attacks (direct + indirect)
-- Jailbreak attempts (DAN, persona replacement)
-- System prompt extraction
-- PII leakage
-- Session anomalies
-- Encoded/obfuscated attacks (Base64, URL, Unicode)
+- 🛡️ Prompt injection attacks (direct + indirect)
+- 🎭 Jailbreak attempts (DAN, persona replacement)
+- 🔑 System prompt extraction
+- 🔒 PII leakage
+- 📊 Session anomalies
+- 🔤 Encoded/obfuscated attacks (Base64, URL, Unicode)
 
 ---
 
@@ -161,9 +160,7 @@ Pre-trained models: [neuralchemy/prompt-injection-detector](https://huggingface.
 
 ## Documentation
 
-📖 **[Full Documentation](DOCUMENTATION.md)** — Complete guide with framework integrations
-
-🚀 **[Quickstart Guide](QUICKSTART.md)** — Get running in 5 minutes
+📖 **[Full Documentation](https://doc.neuralchemy.in)** — Complete guide with framework integrations, enterprise observability, and output filtering.
 
 ---
 
