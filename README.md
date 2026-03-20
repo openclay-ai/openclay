@@ -15,11 +15,10 @@
   <a href="https://pypi.org/project/openclay/"><img alt="PyPI" src="https://img.shields.io/pypi/v/openclay.svg"></a>
   <a href="https://github.com/neuralchemy/openclay"><img alt="License" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <a href="https://doc.neuralchemy.in"><img alt="Docs" src="https://img.shields.io/badge/docs-neuralchemy.in-orange"></a>
-<a href="https://pepy.tech/projects/openclay">
-  <img alt="Downloads" src="https://static.pepy.tech/badge/openclay">
-</a>
+<a href="https://pepy.tech/projects/openclay"><img alt="OpenClay Downloads" src="https://static.pepy.tech/badge/openclay"></a>
+<a href="https://pepy.tech/projects/promptshields"><img alt="PromptShields Legacy Downloads" src="https://static.pepy.tech/badge/promptshields"></a>
 
-  Previously published as <strong>promptshields</strong> (legacy downloads tracked separately).
+  
 </p>
 
 ---
