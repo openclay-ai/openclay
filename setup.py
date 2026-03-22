@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="openclay",
-    version="0.1.0",
+    version="0.2.0",
     author="Neuralchemy",
     description="The Secure-by-Default Execution Framework for LLM Agents.",
     long_description=long_description,
