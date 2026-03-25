@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="openclay",
-    version="0.4.0",
+    version="1.0.0",
     author="Neuralchemy",
     description="The Secure-by-Default Execution Framework for LLM Agents.",
     long_description=long_description,
@@ -13,7 +13,7 @@ setup(
     url="https://github.com/neuralchemy/openclay",
     packages=find_packages(),
     classifiers=[
-        "Development Status :: 3 - Alpha",
+        "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Developers",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.8",

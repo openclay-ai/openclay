@@ -5,7 +5,7 @@ Every boundary is a trust decision.
 OpenClay makes those decisions explicit.
 """
 
-__version__ = "0.4.0"
+__version__ = "1.0.0"
 
 # ── Core Shield API ──────────────────────────────────────────────────
 from .shields import Shield, AsyncShield
@@ -27,6 +27,9 @@ from .knights import Knight, Squad
 
 # ── Memory (v0.3.0) ─────────────────────────────────────────────────
 from .memory import ClayMemory, MemoryWriteBlocked, MemoryReadBlocked
+
+# ── Golem (v1.0.0) ──────────────────────────────────────────────────
+from .golem import Golem, GolemResult
 
 __all__ = [
     # Shield
@@ -63,4 +66,8 @@ __all__ = [
     "ClayMemory",
     "MemoryWriteBlocked",
     "MemoryReadBlocked",
+
+    # Golem (v1.0.0)
+    "Golem",
+    "GolemResult",
 ]

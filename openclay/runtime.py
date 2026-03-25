@@ -173,7 +173,7 @@ class ClayRuntime:
                 user_id=user_id,
                 session_id=session_id,
             )
-            if input_result.get("blocked") and self.policy.auto_block:
+            if input_result.get("blocked") and getattr(self.policy, 'auto_block', True):
                 trace = self._build_trace(
                     blocked=True,
                     layer="input",
@@ -195,7 +195,7 @@ class ClayRuntime:
                 user_id=user_id,
                 user_input=text_input,
             )
-            if output_result.get("blocked") and self.policy.auto_block:
+            if output_result.get("blocked") and getattr(self.policy, 'auto_block', True):
                 trace = self._build_trace(
                     blocked=True,
                     layer="output",

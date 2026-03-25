@@ -232,6 +232,41 @@ print(log.to_json())     # Full JSON export for observability pipelines
 
 ---
 
+## OpenClay v1.0.0 — Golem (Autonomous Entity) 🏰
+
+The **Golem** is a long-running, autonomous entity built from clay. Unlike a Knight (single-task), a Golem runs continuously with lifecycle management.
+
+### 8. Golem (Always-On Agent)
+
+```python
+from openclay import Golem, Shield, ClayMemory
+
+golem = Golem(
+    name="sentinel",
+    llm_caller=my_llm,
+    shield=Shield.strict(),
+    memory=ClayMemory(),
+)
+
+# Background event loop
+golem.start()
+golem.submit("Scan incoming emails for threats")
+golem.submit("Summarise today's security events")
+results = golem.collect()
+golem.stop()
+
+# Or synchronous single-task
+result = golem.run("Analyse this document")
+
+# Full trace log across lifetime
+print(golem.trace_log.explain())
+print(golem.trace_log.to_json())
+```
+
+**Lifecycle**: `start()` → `submit()` → `pause()` → `resume()` → `stop()`
+
+---
+
 ## openclay.shields — Core Threat Detection Engine ✅
 
 `openclay.shields` is the battle-tested security core of OpenClay, evolved from [PromptShield](https://github.com/neuralchemy/promptshield) v3.0 *(now deprecated — see [migration guide](#migration-promptshield--openclay) below)*.
@@ -304,6 +339,7 @@ shield = Shield.secure()
 | `openclay.memory` | ✅ **v0.3.0** | `ClayMemory` with pre-write and pre-read poisoning prevention |
 | `openclay.policies` | ✅ **v0.4.0** | `StrictPolicy`, `ModeratePolicy`, `AuditPolicy`, `CustomPolicy` |
 | `openclay.tracing` | ✅ **v0.4.0** | `Trace` with JSON telemetry + `TraceLog` for multi-event workflows |
+| `openclay.golem` | ✅ **v1.0.0** | `Golem` autonomous long-running entity with lifecycle management |
 
 ---
 
