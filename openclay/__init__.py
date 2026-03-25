@@ -5,7 +5,7 @@ Every boundary is a trust decision.
 OpenClay makes those decisions explicit.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 # ── Core Shield API ──────────────────────────────────────────────────
 from .shields import Shield, AsyncShield
@@ -16,11 +16,11 @@ from .runtime import ClayRuntime, ClayResult, SecureRuntime, WrappedAgent
 # ── Tools (v0.2.0) ──────────────────────────────────────────────────
 from .tools import ClayTool, ToolOutputBlocked, tool
 
-# ── Tracing ──────────────────────────────────────────────────────────
-from .tracing import Trace
+# ── Tracing (v0.4.0) ────────────────────────────────────────────────
+from .tracing import Trace, TraceLog
 
-# ── Policies ─────────────────────────────────────────────────────────
-from .policies import Policy, StrictPolicy, ModeratePolicy, CustomPolicy
+# ── Policies (v0.4.0) ───────────────────────────────────────────────
+from .policies import Policy, StrictPolicy, ModeratePolicy, AuditPolicy, CustomPolicy
 
 # ── Knights (v0.3.0) ────────────────────────────────────────────────
 from .knights import Knight, Squad
@@ -44,13 +44,15 @@ __all__ = [
     "ToolOutputBlocked",
     "tool",
 
-    # Tracing
+    # Tracing (v0.4.0)
     "Trace",
+    "TraceLog",
 
-    # Policies
+    # Policies (v0.4.0)
     "Policy",
     "StrictPolicy",
     "ModeratePolicy",
+    "AuditPolicy",
     "CustomPolicy",
 
     # Knights (v0.3.0)

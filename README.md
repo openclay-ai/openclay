@@ -179,6 +179,59 @@ safe_context = memory.recall("user preferences")
 
 ---
 
+## OpenClay v0.4.0 — Policies & Telemetry 📜
+
+With v0.4.0, every trust decision is **explicit, configurable, and observable**.
+
+### 6. Policy Engine (Configurable Security Posture)
+
+Policies control which layers are active, threat thresholds, and audit behaviour:
+
+```python
+from openclay import ClayRuntime, StrictPolicy, AuditPolicy, CustomPolicy
+
+# Zero-trust: all layers, threshold 0.1
+runtime = ClayRuntime(policy=StrictPolicy())
+
+# Audit mode: scans everything but never blocks (shadow deployment)
+runtime = ClayRuntime(policy=AuditPolicy())
+
+# Fine-grained control
+policy = CustomPolicy(
+    max_threat_level=0.3,
+    disabled_layers={"rate_limiter"},
+    trust_tools=False,
+    auto_block=True,
+)
+runtime = ClayRuntime(policy=policy)
+```
+
+### 7. Trace Telemetry (JSON Observability)
+
+Every shield pass produces a `Trace` with a unique ID, timestamp, and full JSON export:
+
+```python
+result = runtime.run(my_fn, user_input)
+
+print(result.trace.explain())   # One-liner
+print(result.trace.to_json())   # Deterministic JSON telemetry
+```
+
+Collect traces across multi-step workflows with `TraceLog`:
+
+```python
+from openclay import TraceLog
+
+log = TraceLog()
+log.append(result1.trace)
+log.append(result2.trace)
+
+print(log.explain())     # Multi-line summary
+print(log.to_json())     # Full JSON export for observability pipelines
+```
+
+---
+
 ## openclay.shields — Core Threat Detection Engine ✅
 
 `openclay.shields` is the battle-tested security core of OpenClay, evolved from [PromptShield](https://github.com/neuralchemy/promptshield) v3.0 *(now deprecated — see [migration guide](#migration-promptshield--openclay) below)*.
@@ -249,7 +302,8 @@ shield = Shield.secure()
 | `openclay.tracing` | ✅ **v0.2.0** | `Trace` explainability for every blocked action |
 | `openclay.knights` | ✅ **v0.3.0** | `Knight` secure entity + `Squad` multi-agent orchestration |
 | `openclay.memory` | ✅ **v0.3.0** | `ClayMemory` with pre-write and pre-read poisoning prevention |
-| `openclay.policies` | 🚧 Draft | `StrictPolicy`, `ModeratePolicy`, `CustomPolicy` |
+| `openclay.policies` | ✅ **v0.4.0** | `StrictPolicy`, `ModeratePolicy`, `AuditPolicy`, `CustomPolicy` |
+| `openclay.tracing` | ✅ **v0.4.0** | `Trace` with JSON telemetry + `TraceLog` for multi-event workflows |
 
 ---
 

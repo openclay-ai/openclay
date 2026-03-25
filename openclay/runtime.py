@@ -1,5 +1,6 @@
 """
-OpenClay Secure Runtime Engine  (v0.2.0)
+OpenClay Secure Runtime Engine  (v0.4.0)
+
 
 The execution wrapper that enforces shields before and after *any* callable.
 Think of it as a firewall for function calls — nothing executes without
@@ -26,7 +27,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from .policies import Policy, StrictPolicy, ModeratePolicy, CustomPolicy
+from .policies import Policy, StrictPolicy, ModeratePolicy, AuditPolicy, CustomPolicy
 from .tracing import Trace
 
 # ---------------------------------------------------------------------------
@@ -114,7 +115,7 @@ class ClayRuntime:
 
         self._trace_enabled = trace
         self._last_trace: Optional[Trace] = None
-        self._disabled_layers: set = set()
+        self._disabled_layers: set = set(self.policy.disabled_layers) if isinstance(self.policy, Policy) else set()
 
     # ------------------------------------------------------------------
     # Shield factory (lazy import to avoid circular deps at module level)
@@ -172,7 +173,7 @@ class ClayRuntime:
                 user_id=user_id,
                 session_id=session_id,
             )
-            if input_result.get("blocked"):
+            if input_result.get("blocked") and self.policy.auto_block:
                 trace = self._build_trace(
                     blocked=True,
                     layer="input",
@@ -194,7 +195,7 @@ class ClayRuntime:
                 user_id=user_id,
                 user_input=text_input,
             )
-            if output_result.get("blocked"):
+            if output_result.get("blocked") and self.policy.auto_block:
                 trace = self._build_trace(
                     blocked=True,
                     layer="output",
@@ -246,6 +247,7 @@ class ClayRuntime:
             input_result=input_result if input_result else None,
             output_result=output_result if output_result else None,
             recommendation=self._recommend(blocked, active),
+            policy_name=getattr(self.policy, 'name', self._policy_name),
         )
         self._last_trace = trace
         return trace
