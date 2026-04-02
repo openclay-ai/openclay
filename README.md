@@ -10,6 +10,7 @@
 </p>
 
 
+Disclaimer: We are continuously conducting background research to better understand agentic AI behavior, security challenges, and emerging risks. The insights gathered from this work help us identify vulnerabilities, improve system safeguards, and apply ongoing fixes to strengthen overall security. You are welcome to use, fork, and improve this project as it evolves through ongoing research and community contributions.
 
 
 <p align="center">
