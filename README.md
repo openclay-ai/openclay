@@ -6,8 +6,11 @@
 
 <p align="center">
   <strong>Secure First → Execute Second.</strong><br/>
-  The universal, zero-trust execution framework for LLM agents.
+   zero-trust execution framework for LLM agents.
 </p>
+
+
+
 
 <p align="center">
   <a href="https://pypi.org/project/openclay/"><img alt="PyPI" src="https://img.shields.io/pypi/v/openclay.svg"></a>
