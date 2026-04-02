@@ -10,7 +10,6 @@
 </p>
 
 
-Disclaimer: We are continuously conducting background research to better understand agentic AI behavior, security challenges, and emerging risks. The insights gathered from this work help us identify vulnerabilities, improve system safeguards, and apply ongoing fixes to strengthen overall security. You are welcome to use, fork, and improve this project as it evolves through ongoing research and community contributions.
 
 
 <p align="center">
@@ -20,6 +19,8 @@ Disclaimer: We are continuously conducting background research to better underst
   <a href="https://doc.neuralchemy.in"><img alt="Docs" src="https://img.shields.io/badge/docs-neuralchemy.in-orange"></a>
    <a href="https://github.com/openclay-ai/openclay"><img alt="License" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
+
+Disclaimer: We are continuously conducting background research to better understand agentic AI behavior, security challenges, and emerging risks. The insights gathered from this work help us identify vulnerabilities, improve system safeguards, and apply ongoing fixes to strengthen overall security. You are welcome to use, fork, and improve this project as it evolves through ongoing research and community contributions.
 
 ---
 
